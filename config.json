@@ -1,0 +1,16 @@
+{
+    "keypair_path": "test-keypair.json",
+    "recipient": "7C4jsPZpht42Tw6MjXWF56Q5RQUocjBBmciEjDa8HRtp",
+    "amount_lamports": 1000,
+    "num_transactions": 10,
+    "rpc_nodes": [
+        {
+            "http_url": "https://api.mainnet-beta.solana.com",
+            "ws_url": "wss://api.mainnet-beta.solana.com"
+        },
+        {
+            "http_url": "https://solana-api.projectserum.com",
+            "ws_url": "wss://solana-api.projectserum.com"
+        }
+    ]
+} 
