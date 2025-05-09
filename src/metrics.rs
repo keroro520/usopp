@@ -1,11 +1,10 @@
 use serde::Serialize;
-use std::time::Duration;
 
 #[derive(Debug, Serialize)]
 pub struct NodeMetrics {
     pub nodename: String,
     pub explorer_url: String,
-    pub confirm_time: Duration,
+    pub confirm_time: u128,
 }
 
 #[derive(Debug, Serialize)]
