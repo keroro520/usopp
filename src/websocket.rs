@@ -3,7 +3,7 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use solana_sdk::signature::Signature;
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -73,13 +73,7 @@ impl WebSocketHandle {
     }
 
     pub async fn monitor_confirmation(&self) -> Result<()> {
-        let monitoring_start_time = Instant::now();
         let (mut ws_stream, _) = connect_async(&self.ws_url).await?;
-        tracing::info!(
-            "WebSocket connection established to {} for {} signatures.",
-            self.ws_url,
-            self.signatures.len()
-        );
 
         let mut request_id_counter: u64 = 1;
         // Maps our request_id to the signature we sent the subscription for
@@ -107,44 +101,13 @@ impl WebSocketHandle {
                 ],
             };
 
-            match serde_json::to_string(&subscription_payload) {
-                Ok(payload_str) => {
-                    tracing::debug!(
-                        "Sending subscription for signature: {} with request_id: {}. Payload: {}",
-                        signature_to_subscribe,
-                        current_request_id,
-                        payload_str
-                    );
-                    if let Err(e) = ws_stream.send(Message::Text(payload_str)).await {
-                        tracing::error!(
-                            "Failed to send subscription request for signature {}: {}. URL: {}",
-                            signature_to_subscribe,
-                            e,
-                            self.ws_url
-                        );
-                        // If sending fails, remove from pending_notifications to avoid waiting indefinitely
-                        pending_notifications.remove(signature_to_subscribe);
-                        continue; // Try next signature
-                    }
-                    pending_acknowledgements.insert(current_request_id, *signature_to_subscribe);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to serialize subscription payload for signature {}: {}",
-                        signature_to_subscribe,
-                        e
-                    );
-                    pending_notifications.remove(signature_to_subscribe);
-                }
-            }
-        }
-
-        if pending_notifications.is_empty() {
-            tracing::warn!(
-                "No signatures to monitor on {} after attempting subscriptions.",
-                self.ws_url
-            );
-            return Ok(()); // All subscriptions failed to send or no signatures initially
+            let payload_str = serde_json::to_string(&subscription_payload)
+                .expect("Failed to serialize subscription payload");
+            ws_stream
+                .send(Message::Text(payload_str))
+                .await
+                .expect("Failed to send subscription request");
+            pending_acknowledgements.insert(current_request_id, *signature_to_subscribe);
         }
 
         tracing::info!(
@@ -216,7 +179,7 @@ impl WebSocketHandle {
                                             .value
                                             .err
                                             .as_ref()
-                                            .map_or(true, |e_val| e_val.is_null());
+                                            .is_none_or(|e_val| e_val.is_null());
                                         let slot = result_data.context.slot;
                                         let confirmation_timestamp = SystemTime::now();
 

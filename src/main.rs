@@ -6,8 +6,7 @@ mod websocket;
 
 use anyhow::Result;
 use clap::Parser;
-use config::{BenchmarkConfig, CliArgs, RpcNode};
-use metrics::{BenchmarkResults, NodeMetrics};
+use config::{BenchmarkConfig, CliArgs};
 use rpc::RpcClientManager;
 use solana_sdk::pubkey;
 use solana_sdk::signature::{read_keypair_file, Signature};
@@ -127,8 +126,7 @@ async fn main() -> Result<()> {
     let total_expected_confirmations = transaction_signatures.len();
 
     tracing::info!("Waiting for transaction confirmations via WebSockets...");
-    let overall_timeout =
-        Duration::from_secs(config.transaction_timeout_seconds.unwrap_or(120) as u64);
+    let overall_timeout = Duration::from_secs(120);
 
     loop {
         if confirmed_transactions.len() >= total_expected_confirmations
