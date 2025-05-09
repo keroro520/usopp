@@ -2,7 +2,8 @@ use anyhow::Result;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use solana_sdk::signature::Signature;
-use std::time::{Duration, Instant};
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -52,29 +53,21 @@ struct SignatureNotification {
     params: SignatureNotificationParams,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SignatureResult {
-    pub err: Option<String>, // This struct remains for potential external use, but isn't directly deserialized from WS message anymore
-    pub slot: u64,
-    #[serde(rename = "confirmationStatus")]
-    pub confirmation_status: String,
-}
-
 pub struct WebSocketHandle {
     ws_url: String,
-    signature: Signature,
-    tx: mpsc::Sender<(Signature, Duration)>,
+    signatures: Vec<Signature>,
+    tx: mpsc::Sender<(Signature, SystemTime, u64)>,
 }
 
 impl WebSocketHandle {
     pub fn new(
         ws_url: String,
-        signature: Signature,
-        tx: mpsc::Sender<(Signature, Duration)>,
+        signatures: Vec<Signature>,
+        tx: mpsc::Sender<(Signature, SystemTime, u64)>,
     ) -> Self {
         Self {
             ws_url,
-            signature,
+            signatures,
             tx,
         }
     }
@@ -82,143 +75,253 @@ impl WebSocketHandle {
     pub async fn monitor_confirmation(&self) -> Result<()> {
         let monitoring_start_time = Instant::now();
         let (mut ws_stream, _) = connect_async(&self.ws_url).await?;
+        tracing::info!(
+            "WebSocket connection established to {} for {} signatures.",
+            self.ws_url,
+            self.signatures.len()
+        );
 
-        // Subscribe to signature confirmation
-        let subscription = SignatureSubscription {
-            jsonrpc: "2.0".to_string(),
-            id: 1,
-            method: "signatureSubscribe".to_string(),
-            params: vec![
-                serde_json::to_value(self.signature.to_string())?,
-                serde_json::json!({
-                    "commitment": "finalized"
-                }),
-            ],
-        };
+        let mut request_id_counter: u64 = 1;
+        // Maps our request_id to the signature we sent the subscription for
+        let mut pending_acknowledgements: HashMap<u64, Signature> = HashMap::new();
+        // Maps the server's subscription_id to the signature
+        let mut active_subscriptions: HashMap<u64, Signature> = HashMap::new();
+        // Keep track of signatures we are still waiting for notifications for
+        let mut pending_notifications: HashSet<Signature> =
+            self.signatures.iter().cloned().collect();
 
-        ws_stream
-            .send(Message::Text(serde_json::to_string(&subscription)?))
-            .await?;
+        for signature_to_subscribe in &self.signatures {
+            let current_request_id = request_id_counter;
+            request_id_counter += 1;
 
-        while let Some(msg) = ws_stream.next().await {
-            match msg? {
-                Message::Text(text) => {
-                    tracing::debug!("Received WebSocket message: {}", text);
+            let subscription_payload = SignatureSubscription {
+                jsonrpc: "2.0".to_string(),
+                id: current_request_id, // Use unique id for each subscription request
+                method: "signatureSubscribe".to_string(),
+                params: vec![
+                    serde_json::to_value(signature_to_subscribe.to_string())?,
+                    serde_json::json!({
+                        "commitment": "finalized",
+                        // Optional: Add encoding if needed, though not strictly necessary for just confirmation
+                        // "encoding": "jsonParsed"
+                    }),
+                ],
+            };
 
-                    // Attempt to parse as a generic JSON value to inspect its structure
-                    let v: serde_json::Value = match serde_json::from_str(&text) {
-                        Ok(val) => val,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to parse message to JSON: {}. Raw message: {}",
-                                e,
-                                text
-                            );
-                            continue;
-                        }
-                    };
-
-                    // Check if it's a subscription acknowledgement
-                    // Acknowledgement has "id" and "result", but no "method"
-                    if v.get("id").is_some()
-                        && v.get("result").is_some()
-                        && v.get("method").is_none()
-                    {
-                        match serde_json::from_value::<SubscriptionAcknowledgement>(v) {
-                            Ok(ack) => {
-                                tracing::info!(
-                                    "Subscription acknowledged for request id {}. WebSocket Subscription ID: {}. Signature: {}",
-                                    ack.id,
-                                    ack.result,
-                                    self.signature
-                                );
-                                // Continue waiting for the actual notification
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to deserialize as SubscriptionAcknowledgement: {}. Raw message: {}",
-                                    e,
-                                    text
-                                );
-                            }
-                        }
+            match serde_json::to_string(&subscription_payload) {
+                Ok(payload_str) => {
+                    tracing::debug!(
+                        "Sending subscription for signature: {} with request_id: {}. Payload: {}",
+                        signature_to_subscribe,
+                        current_request_id,
+                        payload_str
+                    );
+                    if let Err(e) = ws_stream.send(Message::Text(payload_str)).await {
+                        tracing::error!(
+                            "Failed to send subscription request for signature {}: {}. URL: {}",
+                            signature_to_subscribe,
+                            e,
+                            self.ws_url
+                        );
+                        // If sending fails, remove from pending_notifications to avoid waiting indefinitely
+                        pending_notifications.remove(signature_to_subscribe);
+                        continue; // Try next signature
                     }
-                    // Check if it's a signature notification
-                    // Notification has "method": "signatureNotification"
-                    else if v
-                        .get("method")
-                        .is_some_and(|m| m == "signatureNotification")
-                    {
-                        match serde_json::from_value::<SignatureNotification>(v) {
-                            Ok(notification) => {
-                                tracing::debug!(
-                                    "Deserialized as SignatureNotification: {:?}",
-                                    notification
-                                );
-                                // Check if this notification is for the correct subscription if needed,
-                                // though for a single monitored signature, it should be.
-                                // Example: if notification.params.subscription == stored_subscription_id
-
-                                let result_data = notification.params.result;
-                                let no_error = result_data
-                                    .value
-                                    .err
-                                    .as_ref()
-                                    .is_none_or(|e_val| e_val.is_null());
-
-                                // When subscribing with "finalized" commitment, the notification itself means it's finalized.
-                                // We just need to check for an error.
-                                if no_error {
-                                    let confirm_time = monitoring_start_time.elapsed();
-                                    tracing::info!(
-                                        "Signature {} confirmed (finalized) at slot {}. Time: {:?}",
-                                        self.signature,
-                                        result_data.context.slot,
-                                        confirm_time
-                                    );
-                                    if let Err(e) =
-                                        self.tx.send((self.signature, confirm_time)).await
-                                    {
-                                        tracing::error!(
-                                            "Failed to send confirmation to channel: {}",
-                                            e
-                                        );
-                                    }
-                                    break; // Transaction confirmed
-                                } else {
-                                    tracing::error!(
-                                        "Signature {} finalized with error: {:?}. Slot: {}. Raw notification: {}",
-                                        self.signature,
-                                        result_data.value.err,
-                                        result_data.context.slot,
-                                        text
-                                    );
-                                    // Decide if to break or continue based on requirements for error handling.
-                                    // For now, let's break as it's an error state for this signature.
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to deserialize as SignatureNotification: {}. Raw message: {}",
-                                    e,
-                                    text
-                                );
-                            }
-                        }
-                    } else {
-                        tracing::warn!("Received unhandled WebSocket message structure: {}", text);
-                    }
+                    pending_acknowledgements.insert(current_request_id, *signature_to_subscribe);
                 }
-                Message::Close(close_frame) => {
-                    tracing::info!("WebSocket connection closed by server: {:?}", close_frame);
-                    break; // Exit loop on close
-                }
-                _ => {
-                    tracing::debug!("Received non-text WebSocket message");
-                    continue;
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to serialize subscription payload for signature {}: {}",
+                        signature_to_subscribe,
+                        e
+                    );
+                    pending_notifications.remove(signature_to_subscribe);
                 }
             }
+        }
+
+        if pending_notifications.is_empty() {
+            tracing::warn!(
+                "No signatures to monitor on {} after attempting subscriptions.",
+                self.ws_url
+            );
+            return Ok(()); // All subscriptions failed to send or no signatures initially
+        }
+
+        tracing::info!(
+            "All subscription requests sent for {} signatures to {}. Waiting for acknowledgements and notifications.",
+            pending_acknowledgements.len(),
+            self.ws_url
+        );
+
+        while !pending_notifications.is_empty() {
+            match ws_stream.next().await {
+                Some(Ok(msg)) => match msg {
+                    Message::Text(text) => {
+                        tracing::debug!("Received WebSocket message on {}: {}", self.ws_url, text);
+
+                        let v: serde_json::Value =
+                            match serde_json::from_str(&text) {
+                                Ok(val) => val,
+                                Err(e) => {
+                                    tracing::warn!(
+                                    "Failed to parse message to JSON on {}: {}. Raw message: {}",
+                                    self.ws_url, e, text
+                                );
+                                    continue;
+                                }
+                            };
+
+                        // Check if it's a subscription acknowledgement
+                        if v.get("id").is_some()
+                            && v.get("result").is_some()
+                            && v.get("method").is_none()
+                        {
+                            match serde_json::from_value::<SubscriptionAcknowledgement>(v.clone()) {
+                                Ok(ack) => {
+                                    if let Some(signature) =
+                                        pending_acknowledgements.remove(&ack.id)
+                                    {
+                                        tracing::info!(
+                                            "Subscription acknowledged for signature {} (Request ID: {}). WebSocket Subscription ID: {}. URL: {}",
+                                            signature, ack.id, ack.result, self.ws_url
+                                        );
+                                        active_subscriptions.insert(ack.result, signature);
+                                    } else {
+                                        tracing::warn!(
+                                            "Received acknowledgement for unknown request ID: {}. URL: {}. Raw: {}",
+                                            ack.id, self.ws_url, text
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to deserialize SubscriptionAcknowledgement on {}: {}. Raw: {}",
+                                        self.ws_url, e, text
+                                    );
+                                }
+                            }
+                        }
+                        // Check if it's a signature notification
+                        else if v
+                            .get("method")
+                            .is_some_and(|m| m == "signatureNotification")
+                        {
+                            match serde_json::from_value::<SignatureNotification>(v) {
+                                Ok(notification) => {
+                                    if let Some(signature) =
+                                        active_subscriptions.get(&notification.params.subscription)
+                                    {
+                                        let result_data = notification.params.result;
+                                        let no_error = result_data
+                                            .value
+                                            .err
+                                            .as_ref()
+                                            .map_or(true, |e_val| e_val.is_null());
+                                        let slot = result_data.context.slot;
+                                        let confirmation_timestamp = SystemTime::now();
+
+                                        if no_error {
+                                            tracing::info!(
+                                                "Signature {} confirmed (finalized) at slot {} on {}. Timestamp: {:?}. WebSocket Sub ID: {}",
+                                                signature, slot, self.ws_url, confirmation_timestamp, notification.params.subscription
+                                            );
+                                            if let Err(e) = self
+                                                .tx
+                                                .send((*signature, confirmation_timestamp, slot))
+                                                .await
+                                            {
+                                                tracing::error!(
+                                                    "Failed to send confirmation for {} to channel: {}",
+                                                    signature, e
+                                                );
+                                            }
+                                        } else {
+                                            tracing::error!(
+                                                "Signature {} finalized with error on {}: {:?}. Slot: {}. Timestamp: {:?}. WebSocket Sub ID: {}. Raw: {}",
+                                                signature, self.ws_url, result_data.value.err, slot, confirmation_timestamp, notification.params.subscription, text
+                                            );
+                                            if let Err(e) = self
+                                                .tx
+                                                .send((*signature, confirmation_timestamp, slot))
+                                                .await
+                                            {
+                                                tracing::error!(
+                                                    "Failed to send error status for {} to channel: {}",
+                                                    signature, e
+                                                );
+                                            }
+                                        }
+                                        // Remove from pending_notifications regardless of error, as we've received its terminal state.
+                                        pending_notifications.remove(signature);
+                                        // Optionally, remove from active_subscriptions if no more messages are expected for it.
+                                        // active_subscriptions.remove(&notification.params.subscription);
+                                    } else {
+                                        tracing::warn!(
+                                            "Received notification for unknown/inactive subscription ID: {}. URL: {}. Raw: {}",
+                                            notification.params.subscription, self.ws_url, text
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to deserialize SignatureNotification on {}: {}. Raw: {}",
+                                        self.ws_url, e, text
+                                    );
+                                }
+                            }
+                        } else {
+                            tracing::warn!(
+                                "Received unhandled WebSocket message structure on {}: {}",
+                                self.ws_url,
+                                text
+                            );
+                        }
+                    }
+                    Message::Close(close_frame) => {
+                        tracing::info!(
+                            "WebSocket connection to {} closed by server: {:?}",
+                            self.ws_url,
+                            close_frame
+                        );
+                        break; // Exit loop on close
+                    }
+                    _ => {
+                        tracing::debug!("Received non-text WebSocket message on {}", self.ws_url);
+                    }
+                },
+                Some(Err(e)) => {
+                    tracing::error!(
+                        "Error reading from WebSocket stream {}: {}. Remaining signatures: {}",
+                        self.ws_url,
+                        e,
+                        pending_notifications.len()
+                    );
+                    break; // Connection error, stop monitoring this WebSocket
+                }
+                None => {
+                    tracing::info!(
+                        "WebSocket stream {} ended. Remaining signatures: {}",
+                        self.ws_url,
+                        pending_notifications.len()
+                    );
+                    break; // Stream ended
+                }
+            }
+        }
+
+        if !pending_notifications.is_empty() {
+            tracing::warn!(
+                "WebSocket {} finished monitoring with {} pending signatures: {:?}",
+                self.ws_url,
+                pending_notifications.len(),
+                pending_notifications
+            );
+        } else {
+            tracing::info!(
+                "WebSocket {} finished monitoring all signatures.",
+                self.ws_url
+            );
         }
 
         Ok(())
