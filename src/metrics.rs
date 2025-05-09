@@ -15,7 +15,6 @@ pub struct NodeMetrics {
 #[derive(Debug, Serialize)]
 pub enum TransactionStatus {
     Success,
-    Failed(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -46,7 +45,6 @@ impl BenchmarkResults {
         self.total_transactions += 1;
         match metrics.status {
             TransactionStatus::Success => self.successful_transactions += 1,
-            TransactionStatus::Failed(_) => self.failed_transactions += 1,
         }
 
         // Update averages

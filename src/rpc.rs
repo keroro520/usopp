@@ -1,11 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, message::Message, pubkey::Pubkey, signature::Signature,
-    system_instruction, transaction::Transaction,
+    commitment_config::CommitmentConfig, signature::Signature, transaction::Transaction,
 };
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 
 pub struct RpcClientManager {
     clients: Vec<RpcClient>,
@@ -19,54 +17,6 @@ impl RpcClientManager {
             .collect();
 
         Self { clients }
-    }
-
-    pub async fn request_airdrop(&self, pubkey: &Pubkey, lamports: u64) -> Result<()> {
-        const MAX_RETRIES: u32 = 5;
-        const RETRY_DELAY: Duration = Duration::from_secs(5);
-        const AIRDROP_AMOUNT: u64 = 1_000_000_000; // 1 SOL
-
-        let client = &self.clients[0];
-
-        for attempt in 1..=MAX_RETRIES {
-            println!("Airdrop attempt {} of {}", attempt, MAX_RETRIES);
-
-            match client.request_airdrop(pubkey, AIRDROP_AMOUNT).await {
-                Ok(signature) => {
-                    println!("Airdrop request successful, waiting for confirmation...");
-                    match client.confirm_transaction(&signature).await {
-                        Ok(_) => {
-                            // Verify the balance after airdrop
-                            match client.get_balance(pubkey).await {
-                                Ok(balance) => {
-                                    println!("Current balance: {} lamports", balance);
-                                    if balance >= AIRDROP_AMOUNT {
-                                        return Ok(());
-                                    }
-                                    println!(
-                                        "Balance verification failed. Expected >= {}, got {}",
-                                        AIRDROP_AMOUNT, balance
-                                    );
-                                }
-                                Err(e) => println!("Failed to verify balance: {}", e),
-                            }
-                        }
-                        Err(e) => println!("Failed to confirm airdrop: {}", e),
-                    }
-                }
-                Err(e) => println!("Airdrop request failed: {}", e),
-            }
-
-            if attempt < MAX_RETRIES {
-                println!("Waiting {} seconds before retry...", RETRY_DELAY.as_secs());
-                sleep(RETRY_DELAY).await;
-            }
-        }
-
-        Err(anyhow::anyhow!(
-            "airdrop request failed after {} attempts",
-            MAX_RETRIES
-        ))
     }
 
     pub async fn send_transaction(
@@ -94,8 +44,9 @@ impl RpcClientManager {
 mod tests {
     use super::*;
     use solana_sdk::{
-        pubkey::Pubkey,
+        message::Message,
         signature::{Keypair, Signer},
+        system_instruction,
     };
 
     #[tokio::test]

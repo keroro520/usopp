@@ -9,7 +9,7 @@ use clap::Parser;
 use config::{BenchmarkConfig, CliArgs};
 use metrics::{BenchmarkResults, NodeMetrics, TransactionStatus};
 use rpc::RpcClientManager;
-use solana_sdk::signature::{read_keypair_file, Signer};
+use solana_sdk::signature::read_keypair_file;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
