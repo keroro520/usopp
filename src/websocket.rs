@@ -79,7 +79,7 @@ impl WebSocketHandle {
         }
     }
 
-    pub async fn monitor_confirmation(&self) -> Result<()> {
+    pub async fn monitor_confirmation(&self, start_time: Instant) -> Result<()> {
         let (mut ws_stream, _) = connect_async(&self.ws_url).await?;
 
         // Subscribe to signature confirmation
@@ -146,7 +146,7 @@ impl WebSocketHandle {
                     // Notification has "method": "signatureNotification"
                     else if v
                         .get("method")
-                        .map_or(false, |m| m == "signatureNotification")
+                        .is_some_and(|m| m == "signatureNotification")
                     {
                         match serde_json::from_value::<SignatureNotification>(v) {
                             Ok(notification) => {
@@ -163,7 +163,7 @@ impl WebSocketHandle {
                                     .value
                                     .err
                                     .as_ref()
-                                    .map_or(true, |e_val| e_val.is_null());
+                                    .is_none_or(|e_val| e_val.is_null());
 
                                 // When subscribing with "finalized" commitment, the notification itself means it's finalized.
                                 // We just need to check for an error.

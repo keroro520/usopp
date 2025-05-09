@@ -7,7 +7,7 @@ mod websocket;
 use anyhow::Result;
 use clap::Parser;
 use config::{BenchmarkConfig, CliArgs};
-use metrics::{BenchmarkResults, NodeMetrics, TransactionStatus};
+use metrics::{BenchmarkResults, NodeMetrics};
 use rpc::RpcClientManager;
 use solana_sdk::pubkey;
 use solana_sdk::signature::read_keypair_file;
@@ -53,25 +53,30 @@ async fn main() -> Result<()> {
     // Create channel for WebSocket notifications
     let (tx, mut rx) = mpsc::channel(100);
 
-    // Process each transaction
-    for _ in 0..config.num_transactions {
-        let start_time = Instant::now();
-
-        // Build transaction
+    // Pre-build all transactions
+    let mut transactions_with_build_time = Vec::new();
+    for i in 0..config.num_transactions {
+        let amount = config.amount_lamports + i as u64;
         let builder = transaction::TransactionBuilder::new(
             config.rpc_nodes[0].http_url.clone(),
             keypair.insecure_clone(),
             recipient_pubkey,
-            config.amount_lamports,
+            amount,
         );
         let (transaction, build_time) = builder.build_transaction().await?;
+        transactions_with_build_time.push((transaction, build_time));
+    }
+
+    // Process each transaction
+    for (transaction, build_time) in transactions_with_build_time {
+        let start_time = Instant::now();
 
         // Send transaction to all nodes
         let send_results = rpc_manager.send_transaction(&transaction).await?;
 
         // Start WebSocket monitoring for each node
         for (i, (signature, _)) in send_results.iter().enumerate() {
-            let ws_manager = websocket::WebSocketManager::new(
+            let ws_manager = websocket::WebSocketHandle::new(
                 config.rpc_nodes[i].ws_url.clone(),
                 *signature,
                 tx.clone(),
@@ -96,13 +101,11 @@ async fn main() -> Result<()> {
             if let Some((signature, confirm_time)) = rx.recv().await {
                 let explorer_url = format!("https://solscan.io/tx/{}?cluster=devnet", signature);
                 let metrics = NodeMetrics {
-                    node_url: config.rpc_nodes[i].http_url.clone(),
-                    signature,
+                    nodename: config.rpc_nodes[i].http_url.clone(),
                     explorer_url,
                     build_time,
                     send_time: send_results[i].1,
                     confirm_time,
-                    status: TransactionStatus::Success,
                 };
                 node_metrics.push(metrics);
             }

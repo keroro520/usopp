@@ -5,6 +5,7 @@ use std::time::Duration;
 pub struct NodeMetrics {
     pub nodename: String,
     pub explorer_url: String,
+    pub build_time: Duration,
     pub send_time: Duration,
     pub confirm_time: Duration,
 }

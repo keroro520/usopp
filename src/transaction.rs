@@ -32,7 +32,9 @@ impl TransactionBuilder {
         }
     }
 
-    pub async fn build_transaction(&self) -> Result<Transaction> {
+    pub async fn build_transaction(&self) -> Result<(Transaction, Duration)> {
+        let build_start_time = Instant::now();
+
         // Get recent blockhash
         let recent_blockhash = self.rpc_client.get_latest_blockhash().await?;
 
@@ -48,6 +50,7 @@ impl TransactionBuilder {
         let mut transaction = Transaction::new_unsigned(message);
         transaction.sign(&[&self.from_keypair], recent_blockhash);
 
-        Ok(transaction)
+        let build_time = build_start_time.elapsed();
+        Ok((transaction, build_time))
     }
 }
