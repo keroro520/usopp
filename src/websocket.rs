@@ -53,7 +53,13 @@ struct SignatureNotification {
 }
 
 // Type alias for the confirmation result
-pub type ConfirmationResult = (String, SystemTime, u64);
+#[derive(Debug, Clone)]
+pub struct ConfirmationResult {
+    pub signature: String,
+    pub timestamp_us: u64,
+    // pub slot: u64,
+    // pub confirmation_status: Option<String>,
+}
 
 pub struct WebSocketHandle {
     ws_url: String,
@@ -173,28 +179,30 @@ impl WebSocketHandle {
                                             .as_ref()
                                             .is_none_or(|e_val| e_val.is_null());
                                         let slot = result_data.context.slot;
-                                        let confirmation_timestamp = SystemTime::now();
+                                        let confirmation_timestamp = SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .expect("Time went backwards")
+                                            .as_micros()
+                                            as u64;
 
                                         if no_error {
                                             tracing::info!(
-                                                "Signature {} confirmed (finalized) at slot {} on {}. Timestamp: {:?}. WebSocket Sub ID: {}",
+                                                "Signature {} confirmed (finalized) at slot {} on {}. Timestamp (us): {}. WebSocket Sub ID: {}",
                                                 signature, slot, self.ws_url, confirmation_timestamp, notification.params.subscription
                                             );
-                                            confirmations.push((
-                                                signature.to_string(),
-                                                confirmation_timestamp,
-                                                slot,
-                                            ));
+                                            confirmations.push(ConfirmationResult {
+                                                signature: signature.to_string(),
+                                                timestamp_us: confirmation_timestamp,
+                                            });
                                         } else {
                                             tracing::error!(
-                                                "Signature {} finalized with error on {}: {:?}. Slot: {}. Timestamp: {:?}. WebSocket Sub ID: {}. Raw: {}",
+                                                "Signature {} finalized with error on {}: {:?}. Slot: {}. Timestamp (us): {}. WebSocket Sub ID: {}. Raw: {}",
                                                 signature, self.ws_url, result_data.value.err, slot, confirmation_timestamp, notification.params.subscription, text
                                             );
-                                            confirmations.push((
-                                                signature.to_string(),
-                                                confirmation_timestamp,
-                                                slot,
-                                            ));
+                                            confirmations.push(ConfirmationResult {
+                                                signature: signature.to_string(),
+                                                timestamp_us: confirmation_timestamp,
+                                            });
                                         }
                                         // Remove from pending_notifications regardless of error, as we've received its terminal state.
                                         pending_notifications.remove(signature);

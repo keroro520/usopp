@@ -1,4 +1,5 @@
 mod config;
+mod report;
 mod rpc;
 mod transaction;
 mod websocket;
@@ -9,10 +10,8 @@ use config::{BenchmarkConfig, CliArgs};
 use rpc::RpcClientManager;
 use solana_sdk::pubkey;
 use solana_sdk::signature::read_keypair_file;
-use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
-use std::time::SystemTime;
 use tokio::task::JoinHandle;
 use websocket::{ConfirmationResult, WebSocketHandle};
 
@@ -131,7 +130,7 @@ async fn main() -> Result<()> {
     tracing::info!("All transactions sent via HTTP.");
 
     // Collect results from WebSocket threads by awaiting handles
-    let mut all_node_confirmations: Vec<(NodeName, NodeConfirmationResults)> = Vec::new(); // Using type aliases
+    let mut all_node_confirmations: Vec<(NodeName, NodeConfirmationResults)> = Vec::new();
     for handle in ws_handles {
         match handle.await {
             // This is Result<WebSocketTaskResult, JoinError>
@@ -150,24 +149,25 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut per_node_details: HashMap<NodeName, Vec<(String, SystemTime, u64)>> = HashMap::new();
-    for (node_name, node_confirmations_vec) in all_node_confirmations {
-        for (signature, timestamp, slot) in node_confirmations_vec {
-            per_node_details
-                .entry(node_name.clone())
-                .or_default()
-                .push((signature, timestamp, slot));
+    // Generate and print the report
+    if !all_node_confirmations.is_empty() {
+        tracing::info!("Generating benchmark report...");
+        let report_markdown = report::generate_report_markdown(&all_node_confirmations);
+        tracing::info!(
+            "
+Benchmark Report:
+{}",
+            report_markdown
+        );
+
+        // Optionally, write to a file:
+        match fs::write("benchmark_report.md", &report_markdown) {
+            Ok(_) => tracing::info!("Benchmark report successfully written to benchmark_report.md"),
+            Err(e) => tracing::error!("Failed to write benchmark report to file: {}", e),
         }
+    } else {
+        tracing::info!("No node confirmations received, skipping report generation.");
     }
 
-    // Serialize per_node_details to JSON and write to file
-    tracing::info!("Serializing per-node details to metrics.json...");
-    match serde_json::to_string_pretty(&per_node_details) {
-        Ok(json_output) => match fs::write("metrics.json", json_output) {
-            Ok(_) => tracing::info!("Successfully wrote metrics to metrics.json"),
-            Err(e) => tracing::error!("Failed to write metrics.json: {}", e),
-        },
-        Err(e) => tracing::error!("Failed to serialize per-node_details to JSON: {}", e),
-    }
     Ok(())
 }
