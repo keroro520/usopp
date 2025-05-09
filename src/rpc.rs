@@ -54,7 +54,11 @@ impl RpcClientManager {
                             .send_transaction(&transaction)
                             .await
                             .unwrap_or_else(|e| {
-                                panic!("Failed to send transaction via RPC client: {:?}", e)
+                                if !e.to_string().contains("processed") {
+                                    panic!("Failed to send transaction via RPC client: {:?}", e);
+                                } else {
+                                    transaction.signatures[0]
+                                }
                             });
                     });
                 }

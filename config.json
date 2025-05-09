@@ -2,7 +2,7 @@
     "keypair_path": ".private_key",
     "recipient": "SJDjJMwSTPt3Bs3GKBGfESLqUcKRV8M1dnbhkLatu41",
     "amount_lamports": 1000,
-    "num_transactions": 1,
+    "num_transactions": 5,
     "rpc_nodes": [
         {
             "name": "quicknode",
