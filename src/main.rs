@@ -1,5 +1,4 @@
 mod config;
-mod metrics;
 mod rpc;
 mod transaction;
 mod websocket;
@@ -13,7 +12,7 @@ use solana_sdk::signature::{read_keypair_file, Signature};
 use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::SystemTime;
 use tokio::task::JoinHandle;
 use websocket::{ConfirmationResult, WebSocketHandle};
 
@@ -27,10 +26,6 @@ type WebSocketJoinHandle = JoinHandle<WebSocketTaskResult>;
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-
-    // Capture benchmark start time if needed for relative durations later
-    let benchmark_start_time = Instant::now();
-    let benchmark_start_system_time = SystemTime::now();
 
     // Parse command line arguments
     let args = CliArgs::parse();
