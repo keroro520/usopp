@@ -46,12 +46,6 @@ async fn main() -> Result<()> {
         .collect();
     let rpc_manager = RpcClientManager::new(rpc_urls);
 
-    // Initialize results collector
-    let mut results = BenchmarkResults::new();
-
-    // Create channel for WebSocket notifications
-    let (tx, mut rx) = mpsc::channel(100);
-
     // Pre-build all transactions
     let mut transactions = Vec::new();
     for i in 0..config.num_transactions {
@@ -66,70 +60,15 @@ async fn main() -> Result<()> {
         transactions.push(transaction);
     }
 
-    // Process each transaction
-    for transaction in transactions.iter() {
-        // Send transaction to all nodes
-        let send_results = rpc_manager.send_transaction(transaction).await?;
-
-        // Start WebSocket monitoring for each node
-        for (node_idx, (signature, _send_duration)) in send_results.iter().enumerate() {
-            if node_idx < config.rpc_nodes.len() {
-                let ws_manager = websocket::WebSocketHandle::new(
-                    config.rpc_nodes[node_idx].ws_url.clone(),
-                    *signature,
-                    tx.clone(),
-                );
-
-                // Spawn WebSocket monitoring task
-                tokio::spawn(async move {
-                    if let Err(e) = ws_manager.monitor_confirmation().await {
-                        tracing::error!("WebSocket monitoring error: {:#}", e);
-                        std::process::exit(1);
-                    }
-                });
-            }
-        }
-
-        // Wait for confirmation from all nodes
-        let mut node_metrics_for_tx = Vec::new();
-        for _ in 0..send_results.len() {
-            if let Some((signature, confirm_time)) = rx.recv().await {
-                let mut original_node_idx = None;
-                for (idx, (s, _)) in send_results.iter().enumerate() {
-                    if *s == signature {
-                        original_node_idx = Some(idx);
-                        break;
-                    }
-                }
-
-                if let Some(node_idx) = original_node_idx {
-                    if node_idx < config.rpc_nodes.len() {
-                        let explorer_url =
-                            format!("https://solscan.io/tx/{}?cluster=devnet", signature);
-                        let metrics = NodeMetrics {
-                            nodename: config.rpc_nodes[node_idx].http_url.clone(),
-                            explorer_url,
-                            confirm_time,
-                        };
-                        node_metrics_for_tx.push(metrics);
-                    }
-                } else {
-                    tracing::warn!(
-                        "Received confirmation for an unknown signature: {}",
-                        signature
-                    );
-                }
-            }
-        }
-
-        // Add metrics to results
-        for metrics in node_metrics_for_tx {
-            results.add_metrics(metrics);
-        }
-    }
-
-    // Output results
-    println!("{}", results.to_json());
+    // Send transactions
+    tracing::info!(
+        "Sending {} transactions to {} RPC nodes...",
+        transactions.len(),
+        config.rpc_nodes.len()
+    );
+    // Ensuring the correct plural method name is used.
+    rpc_manager.send_transactions(&transactions);
+    tracing::info!("All transactions sent via HTTP.");
 
     Ok(())
 }
