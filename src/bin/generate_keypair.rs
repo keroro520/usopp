@@ -1,6 +1,4 @@
-use serde_json;
-use solana_sdk::signer::keypair::Keypair;
-use solana_sdk::signer::Signer;
+use solana_sdk::signature::{Keypair, Signer};
 use std::fs::File;
 use std::io::Write;
 

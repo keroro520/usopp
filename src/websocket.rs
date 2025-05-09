@@ -3,8 +3,7 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use solana_sdk::signature::Signature;
 use std::collections::{HashMap, HashSet};
-use std::time::{Instant, SystemTime};
-use tokio::sync::mpsc;
+use std::time::SystemTime;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 // Sent to the server to subscribe
@@ -53,36 +52,29 @@ struct SignatureNotification {
     params: SignatureNotificationParams,
 }
 
+// Type alias for the confirmation result
+pub type ConfirmationResult = (Signature, SystemTime, u64);
+
 pub struct WebSocketHandle {
     ws_url: String,
     signatures: Vec<Signature>,
-    tx: mpsc::Sender<(Signature, SystemTime, u64)>,
 }
 
 impl WebSocketHandle {
-    pub fn new(
-        ws_url: String,
-        signatures: Vec<Signature>,
-        tx: mpsc::Sender<(Signature, SystemTime, u64)>,
-    ) -> Self {
-        Self {
-            ws_url,
-            signatures,
-            tx,
-        }
+    pub fn new(ws_url: String, signatures: Vec<Signature>) -> Self {
+        Self { ws_url, signatures }
     }
 
-    pub async fn monitor_confirmation(&self) -> Result<()> {
+    pub async fn monitor_confirmation(&self) -> Result<Vec<ConfirmationResult>> {
         let (mut ws_stream, _) = connect_async(&self.ws_url).await?;
 
         let mut request_id_counter: u64 = 1;
-        // Maps our request_id to the signature we sent the subscription for
         let mut pending_acknowledgements: HashMap<u64, Signature> = HashMap::new();
-        // Maps the server's subscription_id to the signature
         let mut active_subscriptions: HashMap<u64, Signature> = HashMap::new();
-        // Keep track of signatures we are still waiting for notifications for
         let mut pending_notifications: HashSet<Signature> =
             self.signatures.iter().cloned().collect();
+
+        let mut confirmations: Vec<ConfirmationResult> = Vec::new();
 
         for signature_to_subscribe in &self.signatures {
             let current_request_id = request_id_counter;
@@ -188,36 +180,24 @@ impl WebSocketHandle {
                                                 "Signature {} confirmed (finalized) at slot {} on {}. Timestamp: {:?}. WebSocket Sub ID: {}",
                                                 signature, slot, self.ws_url, confirmation_timestamp, notification.params.subscription
                                             );
-                                            if let Err(e) = self
-                                                .tx
-                                                .send((*signature, confirmation_timestamp, slot))
-                                                .await
-                                            {
-                                                tracing::error!(
-                                                    "Failed to send confirmation for {} to channel: {}",
-                                                    signature, e
-                                                );
-                                            }
+                                            confirmations.push((
+                                                *signature,
+                                                confirmation_timestamp,
+                                                slot,
+                                            ));
                                         } else {
                                             tracing::error!(
                                                 "Signature {} finalized with error on {}: {:?}. Slot: {}. Timestamp: {:?}. WebSocket Sub ID: {}. Raw: {}",
                                                 signature, self.ws_url, result_data.value.err, slot, confirmation_timestamp, notification.params.subscription, text
                                             );
-                                            if let Err(e) = self
-                                                .tx
-                                                .send((*signature, confirmation_timestamp, slot))
-                                                .await
-                                            {
-                                                tracing::error!(
-                                                    "Failed to send error status for {} to channel: {}",
-                                                    signature, e
-                                                );
-                                            }
+                                            confirmations.push((
+                                                *signature,
+                                                confirmation_timestamp,
+                                                slot,
+                                            ));
                                         }
                                         // Remove from pending_notifications regardless of error, as we've received its terminal state.
                                         pending_notifications.remove(signature);
-                                        // Optionally, remove from active_subscriptions if no more messages are expected for it.
-                                        // active_subscriptions.remove(&notification.params.subscription);
                                     } else {
                                         tracing::warn!(
                                             "Received notification for unknown/inactive subscription ID: {}. URL: {}. Raw: {}",
@@ -286,6 +266,6 @@ impl WebSocketHandle {
             );
         }
 
-        Ok(())
+        Ok(confirmations)
     }
 }

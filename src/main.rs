@@ -13,9 +13,8 @@ use solana_sdk::signature::{read_keypair_file, Signature};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use websocket::WebSocketHandle;
+use websocket::{ConfirmationResult, WebSocketHandle};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -65,14 +64,8 @@ async fn main() -> Result<()> {
     }
     tracing::info!("All {} transactions built.", transactions.len());
 
-    // Create an mpsc channel for WebSocket results
-    // Channel sends (Signature, Confirmation SystemTime, Slot)
-    let (ws_result_tx, mut ws_result_rx) = mpsc::channel::<(Signature, SystemTime, u64)>(
-        config.num_transactions * config.rpc_nodes.len(),
-    );
-
     // Spawn WebSocket monitoring threads
-    let mut ws_handles: Vec<JoinHandle<Result<()>>> = Vec::new();
+    let mut ws_handles: Vec<JoinHandle<Result<Vec<ConfirmationResult>>>> = Vec::new(); // Corrected JoinHandle type
     tracing::info!(
         "Spawning WebSocket monitoring threads for {} RPC nodes and {} signatures...",
         config.rpc_nodes.len(),
@@ -82,26 +75,33 @@ async fn main() -> Result<()> {
     for rpc_node_config in &config.rpc_nodes {
         let node_ws_url = rpc_node_config.ws_url.clone();
         let signatures_clone = transaction_signatures.clone();
-        let ws_result_tx_clone = ws_result_tx.clone();
+        // let ws_result_tx_clone = ws_result_tx.clone(); // Removed
 
         let handle = tokio::spawn(async move {
             tracing::info!("Connecting WebSocket to {}...", node_ws_url);
-            let ws_handle =
-                WebSocketHandle::new(node_ws_url.clone(), signatures_clone, ws_result_tx_clone);
-            if let Err(e) = ws_handle.monitor_confirmation().await {
-                tracing::error!(
-                    "WebSocket monitoring failed for {}: {}. Thread finishing.",
-                    node_ws_url,
-                    e
-                );
-                return Err(e); // Propagate error out of the spawned task
+            let ws_handle = WebSocketHandle::new(node_ws_url.clone(), signatures_clone); // tx_clone removed
+            match ws_handle.monitor_confirmation().await {
+                // Now returns Result<Vec<...>>
+                Ok(confirmations) => {
+                    tracing::info!(
+                        "WebSocket monitoring for {} completed, {} confirmations received.",
+                        node_ws_url,
+                        confirmations.len()
+                    );
+                    Ok(confirmations)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "WebSocket monitoring failed for {}: {}. Thread finishing.",
+                        node_ws_url,
+                        e
+                    );
+                    Err(e) // Propagate error out of the spawned task
+                }
             }
-            Ok(())
         });
         ws_handles.push(handle);
     }
-    // Drop the original sender to ensure the channel closes when all clones are dropped
-    drop(ws_result_tx);
 
     // Initialize RPC clients (HTTP)
     let rpc_http_urls: Vec<String> = config
@@ -121,65 +121,70 @@ async fn main() -> Result<()> {
     rpc_manager.send_transactions(&transactions);
     tracing::info!("All transactions sent via HTTP.");
 
-    // Collect results from WebSocket threads
-    let mut confirmed_transactions: HashMap<Signature, (SystemTime, u64)> = HashMap::new();
-    let total_expected_confirmations = transaction_signatures.len();
-
-    tracing::info!("Waiting for transaction confirmations via WebSockets...");
-    let overall_timeout = Duration::from_secs(120);
-
-    loop {
-        if confirmed_transactions.len() >= total_expected_confirmations
-            || benchmark_start_time.elapsed() > overall_timeout
-        {
-            if benchmark_start_time.elapsed() > overall_timeout
-                && confirmed_transactions.len() < total_expected_confirmations
-            {
-                tracing::warn!(
-                    "Overall timeout reached while waiting for confirmations. Received {}/{}",
-                    confirmed_transactions.len(),
-                    total_expected_confirmations
+    // Collect results from WebSocket threads by awaiting handles
+    let mut all_node_confirmations: Vec<Vec<ConfirmationResult>> = Vec::new();
+    for handle in ws_handles {
+        match handle.await {
+            // This is Result<Result<Vec<ConfirmationResult>>, JoinError>
+            Ok(Ok(node_confirmations)) => {
+                all_node_confirmations.push(node_confirmations);
+            }
+            Ok(Err(e)) => {
+                tracing::error!("A WebSocket monitoring task returned an error: {}", e);
+            }
+            Err(e) => {
+                tracing::error!(
+                    "A WebSocket monitoring task failed to join (panicked): {}",
+                    e
                 );
             }
-            break;
-        }
-
-        match tokio::time::timeout(Duration::from_secs(1), ws_result_rx.recv()).await {
-            Ok(Some((signature, timestamp, slot))) => {
-                if !confirmed_transactions.contains_key(&signature) {
-                    let duration_since_start = timestamp
-                        .duration_since(benchmark_start_system_time)
-                        .unwrap_or_else(|_| Duration::from_secs(0));
-                    tracing::info!(
-                        "CONFIRMED: Signature {} at {:?} (took {:?}), slot {}. ({}/{})",
-                        signature,
-                        timestamp,
-                        duration_since_start,
-                        slot,
-                        confirmed_transactions.len() + 1,
-                        total_expected_confirmations
-                    );
-                    confirmed_transactions.insert(signature, (timestamp, slot));
-                } else {
-                    let duration_since_start = timestamp
-                        .duration_since(benchmark_start_system_time)
-                        .unwrap_or_else(|_| Duration::from_secs(0));
-                    tracing::debug!(
-                        "DUPLICATE CONF: Signature {} already confirmed. New confirmation at {:?} (took {:?}), slot {}.",
-                        signature, timestamp, duration_since_start, slot
-                    );
-                }
-            }
-            Ok(None) => {
-                tracing::info!("WebSocket result channel closed.");
-                break; // Channel closed, no more results will arrive
-            }
-            Err(_) => {}
         }
     }
 
+    tracing::info!("Processing collected WebSocket results...");
+
+    let mut confirmed_transactions: HashMap<Signature, (SystemTime, u64)> = HashMap::new();
+    let total_expected_confirmations = transaction_signatures.len();
+
+    for node_confirmations_vec in all_node_confirmations {
+        for (signature, timestamp, slot) in node_confirmations_vec {
+            if !confirmed_transactions.contains_key(&signature) {
+                let duration_since_start = timestamp
+                    .duration_since(benchmark_start_system_time)
+                    .unwrap_or_else(|_| Duration::from_secs(0));
+                tracing::info!(
+                    "CONFIRMED (from collected results): Signature {} at {:?} (took {:?}), slot {}. ({}/{})",
+                    signature,
+                    timestamp,
+                    duration_since_start,
+                    slot,
+                    confirmed_transactions.len() + 1,
+                    total_expected_confirmations
+                );
+                confirmed_transactions.insert(signature, (timestamp, slot));
+            } else {
+                // Potentially log if a signature is confirmed by multiple nodes, if relevant
+                // Or if the timestamp/slot differs, which might be interesting data.
+                tracing::debug!(
+                    "DUPLICATE CONF (from collected results): Signature {} already processed. New data: {:?}, slot {}.",
+                    signature, timestamp, slot
+                );
+            }
+        }
+    }
+
+    if benchmark_start_time.elapsed() > Duration::from_secs(120)
+        && confirmed_transactions.len() < total_expected_confirmations
+    {
+        tracing::warn!(
+            "Benchmark timeout likely exceeded. Received {}/{} confirmations.",
+            confirmed_transactions.len(),
+            total_expected_confirmations
+        );
+    }
+
     tracing::info!(
-        "Finished collecting WebSocket results. {} unique transactions confirmed.",
+        "Finished processing WebSocket results. {} unique transactions confirmed.",
         confirmed_transactions.len()
     );
     if !confirmed_transactions.is_empty() {
@@ -196,26 +201,11 @@ async fn main() -> Result<()> {
             );
         }
     }
-    if confirmed_transactions.len() < total_expected_confirmations {
-        tracing::warn!(
-            "{} transactions were not confirmed via WebSocket within the timeout.",
-            total_expected_confirmations - confirmed_transactions.len()
-        );
-    }
 
-    // Wait for all WebSocket threads to finish
-    tracing::info!("Waiting for all WebSocket monitoring threads to complete...");
-    for handle in ws_handles {
-        match handle.await {
-            Ok(Ok(_)) => { /* Thread completed successfully */ }
-            Ok(Err(e)) => tracing::error!(
-                "A WebSocket monitoring thread panicked or returned an error: {}",
-                e
-            ),
-            Err(e) => tracing::error!("A WebSocket monitoring thread failed to join: {}", e),
-        }
-    }
-    tracing::info!("All WebSocket monitoring threads completed.");
+    // Wait for all WebSocket threads to finish - This is already done by awaiting handles above.
+    // tracing::info!("Waiting for all WebSocket monitoring threads to complete...");
+    // for handle in ws_handles { ... } // This loop is now for collecting results
+    tracing::info!("All WebSocket monitoring tasks have been awaited.");
 
     // Placeholder for further metrics processing
     // let results = BenchmarkResults { ... };
