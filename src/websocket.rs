@@ -101,9 +101,8 @@ impl WebSocketHandle {
                 params: vec![
                     serde_json::to_value(signature_to_subscribe.to_string())?,
                     serde_json::json!({
-                        "commitment": "finalized",
-                        // Optional: Add encoding if needed, though not strictly necessary for just confirmation
-                        // "encoding": "jsonParsed"
+                        // NOTE: "processed" commitment because we aim to compare the performance of different RPC nodes
+                        "commitment": "processed",
                     }),
                 ],
             };
