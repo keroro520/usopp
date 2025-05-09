@@ -81,6 +81,7 @@ async fn main() -> Result<()> {
             tokio::spawn(async move {
                 if let Err(e) = ws_manager.monitor_confirmation(start_time).await {
                     tracing::error!("WebSocket monitoring error: {:#}", e);
+                    std::process::exit(1);
                 }
             });
         }

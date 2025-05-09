@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
