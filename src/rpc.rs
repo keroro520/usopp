@@ -1,10 +1,8 @@
 use anyhow::{Context, Result};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::Transaction,
+    commitment_config::CommitmentConfig, message::Message, pubkey::Pubkey, signature::Signature,
+    system_instruction, transaction::Transaction,
 };
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -32,7 +30,7 @@ impl RpcClientManager {
 
         for attempt in 1..=MAX_RETRIES {
             println!("Airdrop attempt {} of {}", attempt, MAX_RETRIES);
-            
+
             match client.request_airdrop(pubkey, AIRDROP_AMOUNT).await {
                 Ok(signature) => {
                     println!("Airdrop request successful, waiting for confirmation...");
@@ -45,7 +43,10 @@ impl RpcClientManager {
                                     if balance >= AIRDROP_AMOUNT {
                                         return Ok(());
                                     }
-                                    println!("Balance verification failed. Expected >= {}, got {}", AIRDROP_AMOUNT, balance);
+                                    println!(
+                                        "Balance verification failed. Expected >= {}, got {}",
+                                        AIRDROP_AMOUNT, balance
+                                    );
                                 }
                                 Err(e) => println!("Failed to verify balance: {}", e),
                             }
@@ -68,9 +69,12 @@ impl RpcClientManager {
         ))
     }
 
-    pub async fn send_transaction(&self, transaction: &Transaction) -> Result<Vec<(Signature, Duration)>> {
+    pub async fn send_transaction(
+        &self,
+        transaction: &Transaction,
+    ) -> Result<Vec<(Signature, Duration)>> {
         let mut results = Vec::with_capacity(self.clients.len());
-        
+
         for client in &self.clients {
             let start = Instant::now();
             let signature = client.send_transaction(transaction).await?;
@@ -90,10 +94,8 @@ impl RpcClientManager {
 mod tests {
     use super::*;
     use solana_sdk::{
-        message::Message,
         pubkey::Pubkey,
         signature::{Keypair, Signer},
-        system_instruction,
     };
 
     #[tokio::test]
@@ -103,12 +105,13 @@ mod tests {
         let amount = 1_000_000; // 0.001 SOL
 
         // Create a test transaction
-        let recent_blockhash = from_keypair.sign_message(&[0u8]);
-        let transfer_instruction = system_instruction::transfer(
-            &from_keypair.pubkey(),
-            &to_keypair.pubkey(),
-            amount,
+        let rpc_client = RpcClient::new_with_commitment(
+            "https://api.devnet.solana.com".to_string(),
+            CommitmentConfig::confirmed(),
         );
+        let recent_blockhash = rpc_client.get_latest_blockhash().await.unwrap();
+        let transfer_instruction =
+            system_instruction::transfer(&from_keypair.pubkey(), &to_keypair.pubkey(), amount);
         let message = Message::new(&[transfer_instruction], Some(&from_keypair.pubkey()));
         let mut transaction = Transaction::new_unsigned(message);
         transaction.sign(&[&from_keypair], recent_blockhash);
@@ -120,11 +123,11 @@ mod tests {
         ]);
 
         let results = manager.send_transaction(&transaction).await.unwrap();
-        
+
         assert_eq!(results.len(), 2);
         for (signature, send_time) in results {
             assert!(send_time < Duration::from_secs(1));
             assert_eq!(signature, transaction.signatures[0]);
         }
     }
-} 
+}

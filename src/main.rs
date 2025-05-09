@@ -22,15 +22,16 @@ async fn main() -> Result<()> {
     let args = CliArgs::parse();
 
     // Load configuration
-    let config = if let Some(config_path) = args.config {
-        BenchmarkConfig::from_file(&config_path)?
-    } else {
-        BenchmarkConfig::from_cli(&args)?
-    };
+    let config = BenchmarkConfig::from_file(&args.config)?;
 
     // Load keypair
-    let keypair = read_keypair_file(&config.keypair_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read keypair from {:?}: {}", config.keypair_path, e))?;
+    let keypair = read_keypair_file(&config.keypair_path).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to read keypair from {:?}: {}",
+            config.keypair_path,
+            e
+        )
+    })?;
 
     // Initialize RPC clients
     let rpc_urls: Vec<String> = config
@@ -39,11 +40,6 @@ async fn main() -> Result<()> {
         .map(|node| node.http_url.clone())
         .collect();
     let rpc_manager = RpcClientManager::new(rpc_urls);
-
-    // Request airdrop from the first RPC node
-    println!("Requesting airdrop of 2 SOL...");
-    rpc_manager.request_airdrop(&keypair.pubkey(), 2_000_000_000).await?;
-    println!("Airdrop successful!");
 
     // Initialize results collector
     let mut results = BenchmarkResults::new();
@@ -85,7 +81,11 @@ async fn main() -> Result<()> {
 
         // Wait for confirmation from all nodes
         let mut node_metrics = Vec::new();
-        for (i, _) in send_results.iter().enumerate().take(rpc_manager.num_clients()) {
+        for (i, _) in send_results
+            .iter()
+            .enumerate()
+            .take(rpc_manager.num_clients())
+        {
             if let Some((signature, confirm_time)) = rx.recv().await {
                 let metrics = NodeMetrics {
                     node_url: config.rpc_nodes[i].http_url.clone(),
