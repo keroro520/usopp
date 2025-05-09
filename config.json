@@ -1,16 +1,12 @@
 {
-    "keypair_path": "test-keypair.json",
-    "recipient": "7C4jsPZpht42Tw6MjXWF56Q5RQUocjBBmciEjDa8HRtp",
+    "keypair_path": ".private_key",
+    "recipient": "SJDjJMwSTPt3Bs3GKBGfESLqUcKRV8M1dnbhkLatu41",
     "amount_lamports": 1000,
-    "num_transactions": 10,
+    "num_transactions": 1,
     "rpc_nodes": [
         {
-            "http_url": "https://api.mainnet-beta.solana.com",
-            "ws_url": "wss://api.mainnet-beta.solana.com"
-        },
-        {
-            "http_url": "https://solana-api.projectserum.com",
-            "ws_url": "wss://solana-api.projectserum.com"
+            "http_url": "https://few-stylish-sanctuary.solana-devnet.quiknode.pro/9da60d3851f306c2f6ffee306fd02cfa37e2e244/",
+            "ws_url": "wss://few-stylish-sanctuary.solana-devnet.quiknode.pro/9da60d3851f306c2f6ffee306fd02cfa37e2e244/"
         }
     ]
 } 
