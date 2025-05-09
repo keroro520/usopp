@@ -79,7 +79,8 @@ impl WebSocketHandle {
         }
     }
 
-    pub async fn monitor_confirmation(&self, start_time: Instant) -> Result<()> {
+    pub async fn monitor_confirmation(&self) -> Result<()> {
+        let monitoring_start_time = Instant::now();
         let (mut ws_stream, _) = connect_async(&self.ws_url).await?;
 
         // Subscribe to signature confirmation
@@ -168,7 +169,7 @@ impl WebSocketHandle {
                                 // When subscribing with "finalized" commitment, the notification itself means it's finalized.
                                 // We just need to check for an error.
                                 if no_error {
-                                    let confirm_time = start_time.elapsed();
+                                    let confirm_time = monitoring_start_time.elapsed();
                                     tracing::info!(
                                         "Signature {} confirmed (finalized) at slot {}. Time: {:?}",
                                         self.signature,

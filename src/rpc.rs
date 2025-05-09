@@ -35,9 +35,11 @@ impl RpcClientManager {
         Ok(results)
     }
 
+    /* // Commenting out unused method
     pub fn num_clients(&self) -> usize {
         self.clients.len()
     }
+    */
 }
 
 #[cfg(test)]

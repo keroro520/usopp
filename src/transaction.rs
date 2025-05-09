@@ -8,7 +8,6 @@ use solana_sdk::{
     system_instruction,
     transaction::Transaction,
 };
-use std::time::{Duration, Instant};
 
 pub struct TransactionBuilder {
     rpc_client: RpcClient,
@@ -32,9 +31,7 @@ impl TransactionBuilder {
         }
     }
 
-    pub async fn build_transaction(&self) -> Result<(Transaction, Duration)> {
-        let build_start_time = Instant::now();
-
+    pub async fn build_transaction(&self) -> Result<Transaction> {
         // Get recent blockhash
         let recent_blockhash = self.rpc_client.get_latest_blockhash().await?;
 
@@ -50,7 +47,6 @@ impl TransactionBuilder {
         let mut transaction = Transaction::new_unsigned(message);
         transaction.sign(&[&self.from_keypair], recent_blockhash);
 
-        let build_time = build_start_time.elapsed();
-        Ok((transaction, build_time))
+        Ok(transaction)
     }
 }
