@@ -8,7 +8,7 @@ use clap::Parser;
 use config::{BenchmarkConfig, CliArgs};
 use rpc::RpcClientManager;
 use solana_sdk::pubkey;
-use solana_sdk::signature::{read_keypair_file, Signature};
+use solana_sdk::signature::read_keypair_file;
 use std::collections::HashMap;
 use std::fs;
 use std::str::FromStr;
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut per_node_details: HashMap<NodeName, Vec<(Signature, SystemTime, u64)>> = HashMap::new();
+    let mut per_node_details: HashMap<NodeName, Vec<(String, SystemTime, u64)>> = HashMap::new();
     for (node_name, node_confirmations_vec) in all_node_confirmations {
         for (signature, timestamp, slot) in node_confirmations_vec {
             per_node_details

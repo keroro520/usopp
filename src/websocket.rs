@@ -53,7 +53,7 @@ struct SignatureNotification {
 }
 
 // Type alias for the confirmation result
-pub type ConfirmationResult = (Signature, SystemTime, u64);
+pub type ConfirmationResult = (String, SystemTime, u64);
 
 pub struct WebSocketHandle {
     ws_url: String,
@@ -181,7 +181,7 @@ impl WebSocketHandle {
                                                 signature, slot, self.ws_url, confirmation_timestamp, notification.params.subscription
                                             );
                                             confirmations.push((
-                                                *signature,
+                                                signature.to_string(),
                                                 confirmation_timestamp,
                                                 slot,
                                             ));
@@ -191,7 +191,7 @@ impl WebSocketHandle {
                                                 signature, self.ws_url, result_data.value.err, slot, confirmation_timestamp, notification.params.subscription, text
                                             );
                                             confirmations.push((
-                                                *signature,
+                                                signature.to_string(),
                                                 confirmation_timestamp,
                                                 slot,
                                             ));
