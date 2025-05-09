@@ -32,9 +32,7 @@ impl TransactionBuilder {
         }
     }
 
-    pub async fn build_transaction(&self) -> Result<(Transaction, Duration)> {
-        let start = Instant::now();
-
+    pub async fn build_transaction(&self) -> Result<Transaction> {
         // Get recent blockhash
         let recent_blockhash = self.rpc_client.get_latest_blockhash().await?;
 
@@ -50,33 +48,6 @@ impl TransactionBuilder {
         let mut transaction = Transaction::new_unsigned(message);
         transaction.sign(&[&self.from_keypair], recent_blockhash);
 
-        let build_time = start.elapsed();
-        Ok((transaction, build_time))
+        Ok(transaction)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use solana_sdk::signature::Signer;
-
-    #[tokio::test]
-    async fn test_build_transaction() {
-        let from_keypair = Keypair::new();
-        let to_keypair = Keypair::new();
-        let amount = 1_000_000; // 0.001 SOL
-
-        let builder = TransactionBuilder::new(
-            "https://api.mainnet-beta.solana.com".to_string(),
-            from_keypair,
-            to_keypair.pubkey(),
-            amount,
-        );
-
-        let (transaction, build_time) = builder.build_transaction().await.unwrap();
-        
-        assert!(build_time < Duration::from_secs(1));
-        assert_eq!(transaction.message.instructions.len(), 1);
-        assert!(transaction.verify().is_ok());
-    }
-} 

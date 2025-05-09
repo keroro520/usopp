@@ -3,8 +3,9 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RpcNode {
+    pub name: String,
     pub http_url: String,
     pub ws_url: String,
 }

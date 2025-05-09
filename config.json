@@ -5,6 +5,7 @@
     "num_transactions": 1,
     "rpc_nodes": [
         {
+            "name": "quicknode",
             "http_url": "https://few-stylish-sanctuary.solana-devnet.quiknode.pro/9da60d3851f306c2f6ffee306fd02cfa37e2e244/",
             "ws_url": "wss://few-stylish-sanctuary.solana-devnet.quiknode.pro/9da60d3851f306c2f6ffee306fd02cfa37e2e244/"
         }

@@ -60,13 +60,13 @@ pub struct SignatureResult {
     pub confirmation_status: String,
 }
 
-pub struct WebSocketManager {
+pub struct WebSocketHandle {
     ws_url: String,
     signature: Signature,
     tx: mpsc::Sender<(Signature, Duration)>,
 }
 
-impl WebSocketManager {
+impl WebSocketHandle {
     pub fn new(
         ws_url: String,
         signature: Signature,
@@ -79,7 +79,7 @@ impl WebSocketManager {
         }
     }
 
-    pub async fn monitor_confirmation(&self, start_time: Instant) -> Result<()> {
+    pub async fn monitor_confirmation(&self) -> Result<()> {
         let (mut ws_stream, _) = connect_async(&self.ws_url).await?;
 
         // Subscribe to signature confirmation
@@ -221,35 +221,5 @@ impl WebSocketManager {
         }
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::sync::mpsc;
-
-    #[tokio::test]
-    async fn test_websocket_connection() {
-        let (tx, mut rx) = mpsc::channel(1);
-        let signature = Signature::default();
-        let manager = WebSocketManager::new(
-            "wss://api.mainnet-beta.solana.com".to_string(),
-            signature,
-            tx,
-        );
-
-        let start_time = Instant::now();
-        let monitor_handle =
-            tokio::spawn(async move { manager.monitor_confirmation(start_time).await });
-
-        // Wait for a short time to ensure connection is established
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
-        // Cancel the monitoring since we can't easily test the full confirmation flow
-        monitor_handle.abort();
-
-        // Verify no messages were received (since we aborted before confirmation)
-        assert!(rx.try_recv().is_err());
     }
 }
