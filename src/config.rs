@@ -13,7 +13,7 @@ pub struct RpcNode {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BenchmarkConfig {
     pub keypair_path: PathBuf,
-    pub recipient: Pubkey,
+    pub recipient: String,
     pub amount_lamports: u64,
     pub num_transactions: usize,
     pub rpc_nodes: Vec<RpcNode>,

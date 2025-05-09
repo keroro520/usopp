@@ -9,7 +9,9 @@ use clap::Parser;
 use config::{BenchmarkConfig, CliArgs};
 use metrics::{BenchmarkResults, NodeMetrics, TransactionStatus};
 use rpc::RpcClientManager;
+use solana_sdk::pubkey;
 use solana_sdk::signature::read_keypair_file;
+use std::str::FromStr;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -23,6 +25,10 @@ async fn main() -> Result<()> {
 
     // Load configuration
     let config = BenchmarkConfig::from_file(&args.config)?;
+
+    // Parse recipient pubkey
+    let recipient_pubkey = pubkey::Pubkey::from_str(&config.recipient)
+        .map_err(|e| anyhow::anyhow!("Invalid recipient pubkey: {}", e))?;
 
     // Load keypair
     let keypair = read_keypair_file(&config.keypair_path).map_err(|e| {
@@ -55,7 +61,7 @@ async fn main() -> Result<()> {
         let builder = transaction::TransactionBuilder::new(
             config.rpc_nodes[0].http_url.clone(),
             keypair.insecure_clone(),
-            config.recipient,
+            recipient_pubkey,
             config.amount_lamports,
         );
         let (transaction, build_time) = builder.build_transaction().await?;
