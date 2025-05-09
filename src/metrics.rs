@@ -6,6 +6,7 @@ use std::time::Duration;
 pub struct NodeMetrics {
     pub node_url: String,
     pub signature: Signature,
+    pub explorer_url: String,
     pub build_time: Duration,
     pub send_time: Duration,
     pub confirm_time: Duration,
@@ -71,10 +72,13 @@ mod tests {
     #[test]
     fn test_benchmark_results() {
         let mut results = BenchmarkResults::new();
+        let signature = Signature::default();
+        let explorer_url = format!("https://solscan.io/?cluster=devnet/tx/{}", signature);
 
         let metrics = NodeMetrics {
             node_url: "https://test.com".to_string(),
-            signature: Signature::default(),
+            signature,
+            explorer_url,
             build_time: Duration::from_millis(100),
             send_time: Duration::from_millis(200),
             confirm_time: Duration::from_millis(300),

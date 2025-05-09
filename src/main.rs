@@ -94,9 +94,11 @@ async fn main() -> Result<()> {
             .take(rpc_manager.num_clients())
         {
             if let Some((signature, confirm_time)) = rx.recv().await {
+                let explorer_url = format!("https://solscan.io/tx/{}?cluster=devnet", signature);
                 let metrics = NodeMetrics {
                     node_url: config.rpc_nodes[i].http_url.clone(),
                     signature,
+                    explorer_url,
                     build_time,
                     send_time: send_results[i].1,
                     confirm_time,
