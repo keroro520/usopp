@@ -8,20 +8,10 @@ A Rust-based tool for benchmarking Solana RPC node performance by sending concur
 - WebSocket-based transaction confirmation monitoring
 - Detailed performance metrics collection
 
-## Installation
-
-```bash
-git clone https://github.com/keroro520/usopp.git
-cd usopp
-cargo build --release
-```
-
 ## Usage
 
-### Command Line Arguments
-
 ```bash
-usopp --config <CONFIG_PATH>
+cargo run --release --bin usopp -- -c config.json
 ```
 
 ### Configuration File
@@ -31,7 +21,7 @@ You can also provide a configuration file in JSON format:
 ```json
 {
   "keypair_path": "/path/to/keypair.json",
-  "recipient": "RecipientPubkeyHere",
+  "recipient": "SJDjJMwSTPt3Bs3GKBGfESLqUcKRV8M1dnbhkLatu41",
   "amount_lamports": 1000000,
   "num_transactions": 10,
   "rpc_nodes": [
@@ -45,8 +35,6 @@ You can also provide a configuration file in JSON format:
 ```
 
 ## Output Format
-
-The tool outputs a JSON file containing detailed performance metrics for each transaction and RPC node:
 
 ```markdown
 ## Signature Confirmation Report

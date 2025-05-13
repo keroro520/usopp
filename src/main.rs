@@ -10,7 +10,6 @@ use config::{BenchmarkConfig, CliArgs};
 use rpc::RpcClientManager;
 use solana_sdk::pubkey;
 use solana_sdk::signature::read_keypair_file;
-use std::fs;
 use std::str::FromStr;
 use tokio::task::JoinHandle;
 use websocket::{ConfirmationResult, WebSocketHandle};
@@ -150,24 +149,9 @@ async fn main() -> Result<()> {
     }
 
     // Generate and print the report
-    if !all_node_confirmations.is_empty() {
-        tracing::info!("Generating benchmark report...");
-        let report_markdown = report::generate_report_markdown(&all_node_confirmations);
-        tracing::info!(
-            "
-Benchmark Report:
-{}",
-            report_markdown
-        );
-
-        // Optionally, write to a file:
-        match fs::write("benchmark_report.md", &report_markdown) {
-            Ok(_) => tracing::info!("Benchmark report successfully written to benchmark_report.md"),
-            Err(e) => tracing::error!("Failed to write benchmark report to file: {}", e),
-        }
-    } else {
-        tracing::info!("No node confirmations received, skipping report generation.");
-    }
+    tracing::info!("Generating benchmark report...");
+    let report_markdown = report::generate_report_markdown(&all_node_confirmations);
+    tracing::info!("{}", report_markdown);
 
     Ok(())
 }
