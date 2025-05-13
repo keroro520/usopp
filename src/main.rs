@@ -14,7 +14,6 @@ use std::str::FromStr;
 use tokio::task::JoinHandle;
 use websocket::{ConfirmationResult, WebSocketHandle};
 
-// Type alias for WebSocket task results
 type NodeName = String;
 type NodeConfirmationResults = Vec<ConfirmationResult>;
 type WebSocketTaskResult = Result<(NodeName, NodeConfirmationResults)>;
