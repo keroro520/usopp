@@ -35,6 +35,9 @@ pub fn generate_report_markdown(
     // Step 2: Build per-signature delta table
     let mut md = String::new();
     md.push_str("## Per-Signature Δ from Fastest\n\n");
+    md.push_str("This report shows, for each signature, how much slower each node was compared to the fastest node (Δ).\n");
+    md.push_str("'N/A' means no confirmation from that node.\n\n");
+    md.push_str("Nodes are ranked by their total Δ (lower is better) in the summary below.\n\n");
     md.push_str("| Signature ");
     for node in &all_node_names {
         md.push_str(&format!("| {} (Δ) ", node));
