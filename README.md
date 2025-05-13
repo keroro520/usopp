@@ -1,4 +1,4 @@
-# Ussop: Solana RPC Node Performance Benchmarking Tool
+# Usopp: Solana RPC Node Performance Benchmarking Tool
 
 A Rust-based tool for benchmarking Solana RPC node performance by sending concurrent transactions and measuring various performance metrics.
 
